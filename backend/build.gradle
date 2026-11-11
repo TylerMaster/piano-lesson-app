@@ -1,0 +1,47 @@
+// The Spring Boot plugin does two things:
+//   1. Lets you build a "fat jar" (executable jar with all dependencies inside)
+//      using the `bootJar` task.
+//   2. Provides the `bootRun` task for running the app during development.
+//
+// The dependency-management plugin imports the Spring Boot BOM (Bill of
+// Materials), which defines compatible versions for all Spring libraries.
+// This means you don't have to specify version numbers for Spring dependencies
+// yourself — the BOM picks consistent versions.
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.0'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.pianolesson'
+version = '0.0.1-SNAPSHOT'
+
+// Tell Gradle which Java version to compile with.
+// The 'toolchain' block makes the build portable — if the machine has a
+// different JDK installed, Gradle will find or download Java 21.
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Spring Web: provides the embedded Tomcat server, the REST controller
+    // framework (@RestController, @GetMapping, etc.), and Jackson for
+    // JSON serialisation.
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Spring Data JPA: provides the JPA repository abstraction (JpaRepository),
+    // the @Entity and @Column annotations, and Hibernate as the JPA provider.
+    // Hibernate translates your Java entity classes into SQL queries.
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // The PostgreSQL JDBC driver. Only needed at runtime (Spring/Hibernate
+    // loads it via the JDBC URL), so we use 'runtimeOnly' rather than
+    // 'implementation'.
+    runtimeOnly 'org.postgresql:postgresql'
+}

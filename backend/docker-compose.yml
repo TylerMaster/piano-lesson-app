@@ -1,0 +1,41 @@
+# Docker Compose configuration for Piano Lesson Companion's PostgreSQL database.
+#
+# Port mapping explained:
+#   "5434:5432" means:
+#     - 5434 is the HOST port  — what you use from outside Docker (e.g., Spring
+#       Boot running on your machine, or a database GUI like DBeaver).
+#     - 5432 is the CONTAINER port — PostgreSQL's default port inside the
+#       container. The database process itself never changes; only the external
+#       mapping differs.
+#
+# This project uses 5434 to avoid conflicting with:
+#   - job-scraper-db-1  → 5432
+#   - banking-postgres  → 5433
+#
+# Credentials are loaded from a .env file in this directory (see .env.example).
+# The .env file is excluded from Git.
+
+services:
+  piano-db:
+    image: postgres:16
+    container_name: piano-lesson-db
+    environment:
+      POSTGRES_DB: piano_lessons
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5434:5432"
+    volumes:
+      # Named volume: data persists across container restarts and removals.
+      # The name is specific to this project to avoid any collision with other
+      # volumes on the same machine.
+      - piano_lessons_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d piano_lessons"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  piano_lessons_postgres_data:

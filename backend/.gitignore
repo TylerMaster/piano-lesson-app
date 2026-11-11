@@ -1,0 +1,18 @@
+# Gradle
+.gradle/
+build/
+
+# Credentials — never commit
+.env
+src/main/resources/application-local.properties
+
+# Audio uploads — recordings are not source code
+audio-uploads/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store

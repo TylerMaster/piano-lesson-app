@@ -1,0 +1,32 @@
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Backend
+backend/application-local.properties
+backend/src/main/resources/application-local.properties
+backend/.gradle/
+backend/build/
+backend/audio-uploads/
+
+# Python
+processing/.venv/
+processing/__pycache__/
+processing/*.pyc
+
+# Mobile
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+
+# General
+.DS_Store
+*.log
+
+# Local Claude configuration
+**/.claude/settings.json
+**/.claude/settings.local.json
+
+# Temporary SDK upgrade backups
+mobile/*.sdk57-backup
