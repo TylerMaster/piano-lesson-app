@@ -15,6 +15,7 @@ import {   debugStorage,
   recoverRecording, deleteLesson, renameLesson } from './src/storage';
   import { getRecordingDuration} from './src/storage';
   import PlaybackScreen from './src/PlaybackScreen';
+import CalendarView from './src/CalendarView';
   import { COLORS } from './src/constants/theme';
 import { formatDate } from './src/utils/formatDate';
 import {
@@ -107,6 +108,7 @@ export default function App() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [orphanedRecordings, setOrphanedRecordings] = useState<string[]>([]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
+  const [homeView, setHomeView] = useState<'list' | 'calendar'>('list');
 
   // On startup: load persisted lessons and verify each file still exists.
   // validateAndLoadLessons removes stale entries and re-saves the cleaned list.
@@ -245,61 +247,108 @@ async function handleDeleteLesson(lesson: Lesson) {
         </TouchableOpacity>
 
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Your Lessons</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionLabel, styles.sectionLabelNoMargin]}>
+              Your Lessons
+            </Text>
+            <View style={styles.viewToggle}>
+              <TouchableOpacity
+                style={[
+                  styles.toggleButton,
+                  homeView === 'list' && styles.toggleButtonActive,
+                ]}
+                onPress={() => setHomeView('list')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.toggleText,
+                    homeView === 'list' && styles.toggleTextActive,
+                  ]}
+                >
+                  List
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.toggleButton,
+                  homeView === 'calendar' && styles.toggleButtonActive,
+                ]}
+                onPress={() => setHomeView('calendar')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.toggleText,
+                    homeView === 'calendar' && styles.toggleTextActive,
+                  ]}
+                >
+                  Calendar
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
-          {lessons.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>♩</Text>
-              <Text style={styles.emptyTitle}>No lessons yet</Text>
-              <Text style={styles.emptyHint}>
-                Tap "New Lesson" to record your first lesson.
-              </Text>
-            </View>
+          {homeView === 'list' ? (
+            lessons.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyIcon}>♩</Text>
+                <Text style={styles.emptyTitle}>No lessons yet</Text>
+                <Text style={styles.emptyHint}>
+                  Tap "New Lesson" to record your first lesson.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.lessonList}>
+                {lessons.map((lesson, idx) => (
+                  <LessonItem
+                    key={lesson.id}
+                    lesson={lesson}
+                    isLast={idx === lessons.length - 1}
+                    onPress={() => setSelectedLesson(lesson)}
+                    onDelete={() => handleDeleteLesson(lesson)}
+                  />
+                ))}
+              </View>
+            )
           ) : (
-            <View style={styles.lessonList}>
-              {lessons.map((lesson, idx) => (
-  <LessonItem
-    key={lesson.id}
-    lesson={lesson}
-    isLast={idx === lessons.length - 1}
-    onPress={() => setSelectedLesson(lesson)}
-    onDelete={() => handleDeleteLesson(lesson)}
-  />
-))}
-            </View>
+            <CalendarView
+              lessons={lessons}
+              onSelectLesson={setSelectedLesson}
+            />
           )}
 
           {orphanedRecordings.length > 0 && (
-  <View style={[styles.section, { marginTop: 24 }]}>
-  <Text style={styles.sectionLabel}>Unrecovered Recordings</Text>
+            <View style={[styles.section, { marginTop: 24 }]}>
+              <Text style={styles.sectionLabel}>Unrecovered Recordings</Text>
 
-    <View style={styles.lessonList}>
-      {orphanedRecordings.map((uri) => (
-        <View key={uri} style={styles.lessonItem}>
-          <View style={styles.lessonIconWrap}>
-            <Text style={styles.lessonIcon}>♪</Text>
-          </View>
+              <View style={styles.lessonList}>
+                {orphanedRecordings.map((uri) => (
+                  <View key={uri} style={styles.lessonItem}>
+                    <View style={styles.lessonIconWrap}>
+                      <Text style={styles.lessonIcon}>♪</Text>
+                    </View>
 
-          <View style={styles.lessonMeta}>
-            <Text style={styles.lessonDate}>
-              Recovered recording
-            </Text>
-            <Text style={styles.lessonDuration}>
-              Original date and duration unavailable
-            </Text>
-          </View>
+                    <View style={styles.lessonMeta}>
+                      <Text style={styles.lessonDate}>
+                        Recovered recording
+                      </Text>
+                      <Text style={styles.lessonDuration}>
+                        Original date and duration unavailable
+                      </Text>
+                    </View>
 
-          <TouchableOpacity
-            onPress={() => handleRecoverRecording(uri)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.newLessonText}>Recover</Text>
-          </TouchableOpacity>
-        </View>
-      ))}
-    </View>
-  </View>
-)}
+                    <TouchableOpacity
+                      onPress={() => handleRecoverRecording(uri)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.newLessonText}>Recover</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -473,4 +522,38 @@ deleteButtonText: {
   color: COLORS.textMuted,
   fontWeight: '300',
 },
+
+  // Section header with view toggle
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  sectionLabelNoMargin: {
+    marginBottom: 0,
+  },
+  viewToggle: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  toggleButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  toggleButtonActive: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  toggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  toggleTextActive: {
+    color: '#111111',
+  },
 });
