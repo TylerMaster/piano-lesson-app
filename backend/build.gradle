@@ -44,4 +44,16 @@ dependencies {
     // loads it via the JDBC URL), so we use 'runtimeOnly' rather than
     // 'implementation'.
     runtimeOnly 'org.postgresql:postgresql'
+
+    // JUnit 5 + Mockito + AssertJ + Spring test support, all from one starter.
+    // 'testImplementation' means these jars are only on the classpath when
+    // running tests — they are never bundled into the production jar.
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+// Tell Gradle to use JUnit Platform (JUnit 5) to discover and run tests.
+// Without this block, Gradle defaults to JUnit 4 and finds no tests because
+// all our test annotations (@Test, @ExtendWith, etc.) are from JUnit 5.
+test {
+    useJUnitPlatform()
 }

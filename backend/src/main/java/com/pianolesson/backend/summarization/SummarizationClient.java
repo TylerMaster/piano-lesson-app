@@ -18,6 +18,7 @@ import org.springframework.web.client.RestTemplate;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -179,7 +180,10 @@ public class SummarizationClient {
     // The schema describes: an object with four array properties (corrections,
     // techniques, practiceAssignments, reminders), each containing objects with
     // a "content" string and an "evidence" string.
-    private Map<String, Object> buildInputSchema() {
+    //
+    // Package-private static so SummarizationClientTest can verify the schema
+    // structure (e.g. additionalProperties: false) without an HTTP call.
+    static Map<String, Object> buildInputSchema() {
         Map<String, Object> contentProp = new LinkedHashMap<>();
         contentProp.put("type", "string");
         contentProp.put("description", "A concise, clear statement of the information");
@@ -196,6 +200,7 @@ public class SummarizationClient {
         itemSchema.put("type", "object");
         itemSchema.put("properties", itemProperties);
         itemSchema.put("required", List.of("content", "evidence"));
+        itemSchema.put("additionalProperties", false);
 
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("corrections",         arrayOf(itemSchema, "Mistakes or weaknesses identified by the teacher"));
@@ -210,7 +215,7 @@ public class SummarizationClient {
         return schema;
     }
 
-    private Map<String, Object> arrayOf(Map<String, Object> itemSchema, String description) {
+    private static Map<String, Object> arrayOf(Map<String, Object> itemSchema, String description) {
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "array");
         schema.put("description", description);
@@ -246,7 +251,7 @@ public class SummarizationClient {
             raw = objectMapper.treeToValue(toolUseBlock.input(), LessonSummary.class);
         } catch (Exception e) {
             throw new SummarizationException(
-                    "Failed to parse tool input as LessonSummary: " + e.getMessage(), e);
+                    "Failed to parse tool input as LessonSummary — see cause for details", e);
         }
 
         // All four category lists must be present.  Empty lists are valid;
@@ -307,7 +312,13 @@ public class SummarizationClient {
         if (item == null) return false;
         if (item.content()  == null || item.content().isBlank())  return false;
         if (item.evidence() == null || item.evidence().isBlank()) return false;
-        return transcript.contains(item.evidence());
+        return evidenceFoundInTranscript(transcript, item.evidence());
+    }
+
+    // Package-private static so SummarizationClientTest can verify matching
+    // behaviour without an HTTP call.
+    static boolean evidenceFoundInTranscript(String transcript, String evidence) {
+        return transcript.toLowerCase(Locale.ROOT).contains(evidence.toLowerCase(Locale.ROOT));
     }
 
     private int size(List<?> list) {

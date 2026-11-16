@@ -8,11 +8,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { Lesson, TranscriptStatus } from './types';
+import type { Lesson, LessonSummary, SummaryStatus, TranscriptStatus } from './types';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { COLORS } from './constants/theme';
 import { formatDate } from './utils/formatDate';
-import { registerLesson, uploadAudio, fetchLessonStatus, ApiError } from './api';
+import { registerLesson, uploadAudio, fetchLessonStatus, requestLessonSummary, ApiError } from './api';
 import { updateLesson } from './storage';
 
 
@@ -57,9 +57,20 @@ export default function PlaybackScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // ── Summarization state ─────────────────────────────────────────────────
+  // Initialized from the lesson prop. Updated as the summarization lifecycle
+  // progresses and mirrored to AsyncStorage for persistence.
+  const [summaryStatus, setSummaryStatus] = useState<SummaryStatus | null>(
+    lesson.summaryStatus ?? null
+  );
+  const [summary, setSummary] = useState<LessonSummary | null>(lesson.summary ?? null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
   // ── Refs ────────────────────────────────────────────────────────────────
   const isMountedRef = useRef(true);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const summaryPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
@@ -68,17 +79,25 @@ export default function PlaybackScreen({
     return () => {
       isMountedRef.current = false;
       stopPolling();
+      stopSummaryPolling();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // On mount: if the lesson has a backendId but transcription isn't done,
-  // fetch the current backend status. This resumes the right UI state if
-  // the app was restarted mid-transcription or the transcript was saved on
-  // the backend but not yet locally.
+  // On mount: if the lesson has a backendId, fetch the current backend status
+  // when any work may still be in progress — either transcription or summarization.
+  // This resumes the right UI state if the app was restarted mid-transcription,
+  // mid-summarization, or if results were saved on the backend but not yet locally.
   useEffect(() => {
     const { backendId: initId, transcriptStatus: initStatus, transcript: initTranscript } = lesson;
+    const initSummaryStatus = lesson.summaryStatus;
     if (!initId) return;
-    if (initStatus === 'DONE' && initTranscript) return; // already complete — no network needed
+
+    // Skip the network call only when both transcription and summarization are
+    // already in a terminal state locally. If summary is PENDING or PROCESSING,
+    // we must fetch to get the definitive current state.
+    const needsSummaryRecovery =
+      initSummaryStatus === 'PENDING' || initSummaryStatus === 'PROCESSING';
+    if (initStatus === 'DONE' && initTranscript && !needsSummaryRecovery) return;
 
     fetchLessonStatus(initId)
       .then(result => {
@@ -86,16 +105,23 @@ export default function PlaybackScreen({
 
         setTranscriptStatus(result.transcriptStatus);
         if (result.transcript != null) setTranscript(result.transcript);
+        setSummaryStatus(result.summaryStatus);
+        if (result.summary != null) setSummary(result.summary);
 
         if (result.transcriptStatus === 'DONE') {
           const updates = {
             transcriptStatus: result.transcriptStatus as TranscriptStatus,
             transcript: result.transcript ?? undefined,
+            summaryStatus: result.summaryStatus,
+            ...(result.summary != null && { summary: result.summary }),
           };
           updateLesson(lesson.id, updates)
             .catch(e => console.warn('[Transcription] Could not save DONE locally:', e));
           onLessonUpdate?.({ ...lesson, backendId: initId, ...updates });
 
+          if (result.summaryStatus === 'PENDING' || result.summaryStatus === 'PROCESSING') {
+            startSummaryPolling(initId);
+          }
         } else if (result.transcriptStatus === 'PROCESSING') {
           // Transcription is in progress — resume polling where we left off.
           startPolling(initId);
@@ -161,6 +187,56 @@ export default function PlaybackScreen({
     }, 4000);
   }
 
+  // ── Summary polling helpers ─────────────────────────────────────────────
+
+  function stopSummaryPolling() {
+    if (summaryPollingRef.current !== null) {
+      clearInterval(summaryPollingRef.current);
+      summaryPollingRef.current = null;
+    }
+  }
+
+  // Start a 4-second polling loop for summarization status.
+  // Safe to call when a poll is already running — the guard prevents duplicates.
+  function startSummaryPolling(id: number) {
+    if (summaryPollingRef.current !== null) return;
+
+    summaryPollingRef.current = setInterval(async () => {
+      if (!isMountedRef.current) {
+        stopSummaryPolling();
+        return;
+      }
+
+      try {
+        const result = await fetchLessonStatus(id);
+        if (!isMountedRef.current) return;
+
+        if (result.summaryStatus === 'DONE' || result.summaryStatus === 'FAILED') {
+          stopSummaryPolling();
+          setSummaryStatus(result.summaryStatus);
+          if (result.summary != null) setSummary(result.summary);
+
+          const updates = {
+            summaryStatus: result.summaryStatus,
+            ...(result.summary != null && { summary: result.summary }),
+          };
+          updateLesson(lesson.id, updates)
+            .catch(e => console.warn('[SummaryPolling] Could not persist final status:', e));
+          onLessonUpdate?.({
+            ...lesson,
+            backendId: id,
+            summaryStatus: result.summaryStatus,
+            summary: result.summary ?? undefined,
+          });
+        }
+        // PENDING / PROCESSING: continue polling.
+      } catch {
+        // Transient network failure — keep the interval running.
+        console.warn('[SummaryPolling] Status check failed, will retry');
+      }
+    }, 4000);
+  }
+
   // ── Upload / submit ─────────────────────────────────────────────────────
 
   async function handleSubmit() {
@@ -219,6 +295,72 @@ export default function PlaybackScreen({
       setUploadError(msg);
     } finally {
       if (isMountedRef.current) setIsSubmitting(false);
+    }
+  }
+
+  // ── Summarize ───────────────────────────────────────────────────────────
+
+  async function handleSummarize() {
+    if (isSummarizing || !backendId) return;
+    stopSummaryPolling();
+    setIsSummarizing(true);
+    setSummaryError(null);
+
+    const id = backendId;
+
+    try {
+      await requestLessonSummary(id);
+      setSummaryStatus('PENDING');
+      await updateLesson(lesson.id, { summaryStatus: 'PENDING' });
+      onLessonUpdate?.({ ...lesson, backendId: id, summaryStatus: 'PENDING' });
+      startSummaryPolling(id);
+    } catch (err) {
+      if (!isMountedRef.current) return;
+
+      if (err instanceof ApiError && err.status === 409) {
+        // Summarization is already running or already completed. Fetch the
+        // current status to determine which and act accordingly.
+        try {
+          const result = await fetchLessonStatus(id);
+          if (!isMountedRef.current) return;
+
+          setSummaryStatus(result.summaryStatus);
+          if (result.summary != null) setSummary(result.summary);
+
+          if (result.summaryStatus === 'DONE') {
+            const updates = {
+              summaryStatus: result.summaryStatus,
+              summary: result.summary ?? undefined,
+            };
+            await updateLesson(lesson.id, updates);
+            onLessonUpdate?.({ ...lesson, backendId: id, ...updates });
+          } else if (
+            result.summaryStatus === 'PENDING' ||
+            result.summaryStatus === 'PROCESSING'
+          ) {
+            await updateLesson(lesson.id, { summaryStatus: result.summaryStatus });
+            onLessonUpdate?.({ ...lesson, backendId: id, summaryStatus: result.summaryStatus });
+            startSummaryPolling(id);
+          }
+          // Any other status after a 409 is unexpected. The state setter above
+          // already reflects it — no explicit error message shown.
+        } catch {
+          setSummaryError('Could not retrieve summary status. Try again.');
+        }
+        return;
+      }
+
+      let msg: string;
+      if (err instanceof ApiError) {
+        msg = err.message;
+      } else if (err instanceof Error) {
+        msg = err.message;
+      } else {
+        msg = 'Failed to start summarization. Try again.';
+      }
+      setSummaryError(msg);
+    } finally {
+      if (isMountedRef.current) setIsSummarizing(false);
     }
   }
 
@@ -304,6 +446,101 @@ export default function PlaybackScreen({
         </Text>
         <TouchableOpacity style={styles.actionButton} onPress={handleSubmit}>
           <Text style={styles.actionButtonText}>Get Transcript</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // ── Summary section ─────────────────────────────────────────────────────
+
+  // Returns null until transcription is complete. After that, renders the
+  // appropriate UI card for the current summarization state.
+  //
+  // Priority order:
+  //   1. DONE with summary       → structured display (corrections, techniques,
+  //                                 practice assignments, reminders)
+  //   2. isSummarizing           → requesting spinner text
+  //   3. PENDING or PROCESSING   → generating spinner text with hint
+  //   4. FAILED or summaryError  → error message + retry button
+  //   5. NOT_REQUESTED or null   → "Generate Summary" button
+  function renderSummarySection() {
+    if (transcriptStatus !== 'DONE') return null;
+
+    if (summaryStatus === 'DONE' && summary) {
+      const categories = [
+        { label: 'Corrections',         items: summary.corrections },
+        { label: 'Techniques',          items: summary.techniques },
+        { label: 'Practice Assignments', items: summary.practiceAssignments },
+        { label: 'Reminders',           items: summary.reminders },
+      ];
+      const nonEmpty = categories.filter(c => c.items.length > 0);
+
+      return (
+        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
+          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
+          {nonEmpty.map(cat => (
+            <View key={cat.label} style={styles.summaryCategory}>
+              <Text style={styles.summaryCategoryLabel}>{cat.label}</Text>
+              {cat.items.map((item, idx) => (
+                <View key={idx} style={styles.summaryItem}>
+                  <Text style={styles.summaryItemContent}>{item.content}</Text>
+                  <Text style={styles.summaryItemEvidence}>"{item.evidence}"</Text>
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      );
+    }
+
+    if (isSummarizing) {
+      return (
+        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
+          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
+          <Text style={styles.transcriptionBody}>Requesting summary...</Text>
+        </View>
+      );
+    }
+
+    if (summaryStatus === 'PENDING' || summaryStatus === 'PROCESSING') {
+      return (
+        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
+          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
+          <Text style={styles.transcriptionBody}>
+            Generating summary... This may take a minute.
+          </Text>
+          <Text style={styles.transcriptionHint}>
+            You can leave this screen. The summary will be saved when complete.
+          </Text>
+        </View>
+      );
+    }
+
+    if (summaryStatus === 'FAILED' || summaryError) {
+      return (
+        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
+          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
+          <Text style={styles.transcriptionErrorBody}>
+            {summaryError ?? 'Summary generation failed. Tap below to try again.'}
+          </Text>
+          <TouchableOpacity style={styles.actionButton} onPress={handleSummarize}>
+            <Text style={styles.actionButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // NOT_REQUESTED or null — transcription is done and no summary has been
+    // requested yet.
+    return (
+      <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
+        <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
+        <Text style={styles.transcriptionBody}>
+          Generate an AI summary of this lesson, including corrections, techniques,
+          practice assignments, and reminders.
+        </Text>
+        <TouchableOpacity style={styles.actionButton} onPress={handleSummarize}>
+          <Text style={styles.actionButtonText}>Generate Summary</Text>
         </TouchableOpacity>
       </View>
     );
@@ -441,6 +678,9 @@ export default function PlaybackScreen({
 
         {/* Transcription */}
         {renderTranscriptionSection()}
+
+        {/* Summary — only rendered once transcription is DONE */}
+        {renderSummarySection()}
 
       </ScrollView>
     </View>
@@ -682,5 +922,36 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textMuted,
     textDecorationLine: 'underline',
+  },
+
+  // ── Summary section ───────────────────────────────────────────────────
+  summaryTopMargin: {
+    marginTop: 16,
+  },
+  summaryCategory: {
+    marginTop: 16,
+  },
+  summaryCategoryLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    letterSpacing: 1.0,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  summaryItem: {
+    marginBottom: 12,
+  },
+  summaryItemContent: {
+    fontSize: 15,
+    color: COLORS.textPrimary,
+    lineHeight: 22,
+    marginBottom: 4,
+  },
+  summaryItemEvidence: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    lineHeight: 20,
+    fontStyle: 'italic',
   },
 });
