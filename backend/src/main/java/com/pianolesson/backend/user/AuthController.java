@@ -27,4 +27,14 @@ public class AuthController {
         RegisterResponse response = userService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
+
+    // ── POST /auth/login ──────────────────────────────────────────────────
+    // Accepts: { "email": "...", "password": "..." }
+    // Returns 200 OK: { "userId": 1, "email": "...", "token": "...", "tokenType": "Bearer" }
+    // Returns 400 Bad Request if validation fails (blank fields).
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+        LoginResponse response = userService.login(request);
+        return ResponseEntity.ok(response);
+    }
 }
