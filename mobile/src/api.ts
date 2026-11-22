@@ -46,13 +46,16 @@ async function expectOk<T>(res: Response): Promise<T> {
 // IMPORTANT: check lesson.backendId before calling this. If it is already set,
 // the lesson was registered in a previous attempt and you should skip straight
 // to uploadAudio(). Calling this twice creates a duplicate backend lesson.
-export async function registerLesson(lesson: Lesson): Promise<number> {
+export async function registerLesson(token: string, lesson: Lesson): Promise<number> {
   console.log('Registering lesson at:', `${BACKEND_URL}/lessons`);
 
   try {
     const res = await fetch(`${BACKEND_URL}/lessons`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
       body: JSON.stringify({
         title: lesson.title,
         recordedAt: lesson.date,
@@ -78,12 +81,13 @@ export async function registerLesson(lesson: Lesson): Promise<number> {
 // in FormData — the legacy React Native {uri, name, type} object pattern throws
 // "Unsupported FormDataPart implementation". File.upload() goes through the
 // platform's native HTTP layer and handles multipart encoding correctly.
-export async function uploadAudio(backendId: number, uri: string): Promise<void> {
+export async function uploadAudio(token: string, backendId: number, uri: string): Promise<void> {
   const file = new File(uri);
   const result = await file.upload(`${BACKEND_URL}/lessons/${backendId}/audio`, {
     uploadType: UploadType.MULTIPART,
     fieldName: 'audio',
     mimeType: 'audio/m4a',
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (result.status < 200 || result.status >= 300) {
     const detail = result.body || String(result.status);
@@ -94,13 +98,15 @@ export async function uploadAudio(backendId: number, uri: string): Promise<void>
 // GET /lessons/{id} — fetch the current transcription and summarization status.
 // Poll this after uploadAudio() until transcriptStatus is 'DONE' or 'FAILED',
 // and after requestLessonSummary() until summaryStatus is 'DONE' or 'FAILED'.
-export async function fetchLessonStatus(backendId: number): Promise<{
+export async function fetchLessonStatus(token: string, backendId: number): Promise<{
   transcriptStatus: TranscriptStatus;
   transcript: string | null;
   summaryStatus: SummaryStatus;
   summary: LessonSummary | null;
 }> {
-  const res = await fetch(`${BACKEND_URL}/lessons/${backendId}`);
+  const res = await fetch(`${BACKEND_URL}/lessons/${backendId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   const data = await expectOk<LessonResponse>(res);
   return {
     transcriptStatus: data.transcriptStatus,
@@ -119,9 +125,10 @@ export async function fetchLessonStatus(backendId: number): Promise<{
 //   404 — lesson not found
 //   409 — summarization is already running or already succeeded
 //   422 — transcription is not complete or transcript is blank
-export async function requestLessonSummary(backendId: number): Promise<void> {
+export async function requestLessonSummary(token: string, backendId: number): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/lessons/${backendId}/summarize`, {
     method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
   });
   await expectOk<unknown>(res);
 }

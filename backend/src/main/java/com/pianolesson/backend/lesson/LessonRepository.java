@@ -31,6 +31,19 @@ public interface LessonRepository extends JpaRepository<Lesson, Long> {
     // Used on startup to locate lessons stuck in PROCESSING after a crash.
     List<Lesson> findByTranscriptStatus(TranscriptStatus status);
 
+    // The underscore in User_Id tells Spring Data to traverse the relationship:
+    // Lesson → user (the @ManyToOne field) → id (the primary key on User).
+    // Without the underscore, Spring Data would look for a field named "userId"
+    // directly on Lesson, which does not exist.
+    // Generates: SELECT * FROM lessons WHERE user_id = ?
+    List<Lesson> findByUser_Id(Long userId);
+
+    // Combines a primary-key lookup with an ownership check in one query.
+    // Returns empty if the lesson does not exist OR belongs to a different user.
+    // Used by the service layer to enforce ownership on single-lesson operations.
+    // Generates: SELECT * FROM lessons WHERE id = ? AND user_id = ?
+    Optional<Lesson> findByIdAndUser_Id(Long id, Long userId);
+
     // "find all Lesson rows where summaryStatus is in the given collection".
     // Used on startup to locate lessons stuck in PENDING or PROCESSING after
     // a crash — both statuses need resetting because a crash can occur after

@@ -14,6 +14,7 @@ import { COLORS } from './constants/theme';
 import { formatDate } from './utils/formatDate';
 import { registerLesson, uploadAudio, fetchLessonStatus, requestLessonSummary, ApiError } from './api';
 import { updateLesson } from './storage';
+import { useAuth } from './auth/AuthContext';
 
 
 interface PlaybackScreenProps {
@@ -31,12 +32,16 @@ function formatPlaybackTime(seconds: number): string {
 }
 
 
+const SESSION_EXPIRED_MSG = 'Your session has expired. Please sign out and sign back in.';
+
 export default function PlaybackScreen({
   lesson,
   onBack,
   onRename,
   onLessonUpdate,
 }: PlaybackScreenProps) {
+  const { token } = useAuth();
+
   // ── Audio player ────────────────────────────────────────────────────────
   const player = useAudioPlayer(lesson.uri);
   const status = useAudioPlayerStatus(player);
@@ -99,7 +104,7 @@ export default function PlaybackScreen({
       initSummaryStatus === 'PENDING' || initSummaryStatus === 'PROCESSING';
     if (initStatus === 'DONE' && initTranscript && !needsSummaryRecovery) return;
 
-    fetchLessonStatus(initId)
+    fetchLessonStatus(token!, initId)
       .then(result => {
         if (!isMountedRef.current) return;
 
@@ -129,8 +134,11 @@ export default function PlaybackScreen({
         // PENDING: audio was never uploaded. Show the upload button.
         // FAILED: show the failure UI. No polling needed.
       })
-      .catch(() => {
-        // Backend unreachable on startup — keep whatever local state is stored.
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401 && isMountedRef.current) {
+          setUploadError(SESSION_EXPIRED_MSG);
+        }
+        // Any other error on startup: keep whatever local state is stored.
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Run only on mount. Intentional empty deps — the mount check uses lesson
@@ -158,7 +166,7 @@ export default function PlaybackScreen({
       }
 
       try {
-        const result = await fetchLessonStatus(id);
+        const result = await fetchLessonStatus(token!, id);
         if (!isMountedRef.current) return;
 
         if (result.transcriptStatus === 'DONE' || result.transcriptStatus === 'FAILED') {
@@ -180,7 +188,12 @@ export default function PlaybackScreen({
           });
         }
         // PROCESSING / PENDING: continue polling.
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          stopPolling();
+          if (isMountedRef.current) setUploadError(SESSION_EXPIRED_MSG);
+          return;
+        }
         // Transient network failure — keep the interval running.
         console.warn('[Polling] Status check failed, will retry');
       }
@@ -208,7 +221,7 @@ export default function PlaybackScreen({
       }
 
       try {
-        const result = await fetchLessonStatus(id);
+        const result = await fetchLessonStatus(token!, id);
         if (!isMountedRef.current) return;
 
         if (result.summaryStatus === 'DONE' || result.summaryStatus === 'FAILED') {
@@ -230,7 +243,12 @@ export default function PlaybackScreen({
           });
         }
         // PENDING / PROCESSING: continue polling.
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          stopSummaryPolling();
+          if (isMountedRef.current) setSummaryError(SESSION_EXPIRED_MSG);
+          return;
+        }
         // Transient network failure — keep the interval running.
         console.warn('[SummaryPolling] Status check failed, will retry');
       }
@@ -259,7 +277,7 @@ export default function PlaybackScreen({
       // that a failed upload can be retried against the same backend lesson
       // without creating a duplicate.
       if (currentBackendId === null) {
-        const newId = await registerLesson(lesson);
+        const newId = await registerLesson(token!, lesson);
         currentBackendId = newId;
         setBackendId(newId);
         await updateLesson(lesson.id, { backendId: newId });
@@ -268,7 +286,7 @@ export default function PlaybackScreen({
 
       // Step 2 — Upload the audio file. The backend saves it and immediately
       // kicks off async Whisper transcription.
-      await uploadAudio(currentBackendId, lesson.uri);
+      await uploadAudio(token!, currentBackendId, lesson.uri);
 
       // Step 3 — Reflect PROCESSING locally so the UI updates immediately
       // rather than waiting for the first poll tick.
@@ -285,7 +303,9 @@ export default function PlaybackScreen({
       console.error('[Upload] Error:', err);
 
       let msg: string;
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError && err.status === 401) {
+        msg = SESSION_EXPIRED_MSG;
+      } else if (err instanceof ApiError) {
         msg = err.message;
       } else if (err instanceof Error) {
         msg = err.message;
@@ -309,7 +329,7 @@ export default function PlaybackScreen({
     const id = backendId;
 
     try {
-      await requestLessonSummary(id);
+      await requestLessonSummary(token!, id);
       setSummaryStatus('PENDING');
       await updateLesson(lesson.id, { summaryStatus: 'PENDING' });
       onLessonUpdate?.({ ...lesson, backendId: id, summaryStatus: 'PENDING' });
@@ -321,7 +341,7 @@ export default function PlaybackScreen({
         // Summarization is already running or already completed. Fetch the
         // current status to determine which and act accordingly.
         try {
-          const result = await fetchLessonStatus(id);
+          const result = await fetchLessonStatus(token!, id);
           if (!isMountedRef.current) return;
 
           setSummaryStatus(result.summaryStatus);
@@ -344,14 +364,20 @@ export default function PlaybackScreen({
           }
           // Any other status after a 409 is unexpected. The state setter above
           // already reflects it — no explicit error message shown.
-        } catch {
-          setSummaryError('Could not retrieve summary status. Try again.');
+        } catch (innerErr) {
+          if (innerErr instanceof ApiError && innerErr.status === 401) {
+            setSummaryError(SESSION_EXPIRED_MSG);
+          } else {
+            setSummaryError('Could not retrieve summary status. Try again.');
+          }
         }
         return;
       }
 
       let msg: string;
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError && err.status === 401) {
+        msg = SESSION_EXPIRED_MSG;
+      } else if (err instanceof ApiError) {
         msg = err.message;
       } else if (err instanceof Error) {
         msg = err.message;

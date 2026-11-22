@@ -1,6 +1,8 @@
 package com.pianolesson.backend.lesson;
 
 import com.pianolesson.backend.transcription.TranscriptionClient;
+import com.pianolesson.backend.user.User;
+import com.pianolesson.backend.user.UserRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,34 +31,55 @@ public class LessonService {
     private static final Logger log = LoggerFactory.getLogger(LessonService.class);
 
     private final LessonRepository lessonRepository;
+    private final UserRepository userRepository;
     private final TranscriptionClient transcriptionClient;
     private final Path audioStorageRoot;
 
     public LessonService(
             LessonRepository lessonRepository,
+            UserRepository userRepository,
             TranscriptionClient transcriptionClient,
             @Value("${storage.audio.directory}") String audioStorageDirectory
     ) {
         this.lessonRepository = lessonRepository;
+        this.userRepository = userRepository;
         this.transcriptionClient = transcriptionClient;
         this.audioStorageRoot = Paths.get(audioStorageDirectory).toAbsolutePath().normalize();
     }
 
     // ── Lesson CRUD ───────────────────────────────────────────────────────
 
-    public List<Lesson> findAll() {
-        return lessonRepository.findAll();
+    public List<Lesson> findAllByUserId(Long userId) {
+        return lessonRepository.findByUser_Id(userId);
     }
 
-    public Lesson findById(Long id) {
+    // Ownership-scoped lookup used by all controller-facing operations.
+    // Returns 404 whether the lesson is missing or belongs to a different user —
+    // the caller cannot tell which, which is the intended behavior.
+    public Lesson findByIdForUser(Long id, Long userId) {
+        return lessonRepository.findByIdAndUser_Id(id, userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Lesson " + id + " not found"));
+    }
+
+    // Unscoped lookup retained for internal use by transcribeAsync only.
+    // That method runs in a background thread after the controller has already
+    // verified ownership, so no second ownership check is needed there.
+    Lesson findById(Long id) {
         return lessonRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Lesson " + id + " not found"));
     }
 
     @Transactional
-    public Lesson createLesson(String title, Instant recordedAt, long durationMs) {
-        Lesson lesson = new Lesson(title, recordedAt, durationMs);
+    public Lesson createLesson(Long userId, String title, Instant recordedAt, long durationMs) {
+        // The userId comes from the validated JWT, not the request body.
+        // If the user row is missing despite a valid token, the account was
+        // deleted after the token was issued — treat it as unauthenticated.
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED, "Authenticated user not found"));
+        Lesson lesson = new Lesson(user, title, recordedAt, durationMs);
         return lessonRepository.save(lesson);
     }
 
@@ -91,8 +114,8 @@ public class LessonService {
     // ── Audio upload ──────────────────────────────────────────────────────
 
     @Transactional
-    public Path saveAudio(Long lessonId, MultipartFile file) throws IOException {
-        Lesson lesson = findById(lessonId);
+    public Path saveAudio(Long lessonId, Long userId, MultipartFile file) throws IOException {
+        Lesson lesson = findByIdForUser(lessonId, userId);
 
         Path lessonDir = audioStorageRoot.resolve(String.valueOf(lessonId));
         Files.createDirectories(lessonDir);

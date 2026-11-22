@@ -2,6 +2,8 @@ package com.pianolesson.backend.user;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -44,6 +46,16 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    // @Enumerated(STRING) stores the enum name as a VARCHAR ("STUDENT", "ADMIN")
+    // rather than its ordinal number (0, 1).  String storage is safer: adding
+    // new roles or reordering them won't corrupt existing rows — the same
+    // reasoning as TranscriptStatus and SummaryStatus on the Lesson entity.
+    // Defaults to STUDENT so that every account created through public
+    // registration gets the least-privileged role automatically.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
+    private UserRole role = UserRole.STUDENT;
+
     // JPA requires a no-argument constructor to reconstruct entities from
     // database rows.  Protected prevents direct use in application code.
     protected User() {}
@@ -74,4 +86,6 @@ public class User {
     String getPasswordHash() { return passwordHash; }
 
     public Instant getCreatedAt() { return createdAt; }
+
+    public UserRole getRole() { return role; }
 }

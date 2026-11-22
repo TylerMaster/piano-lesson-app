@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pianolesson.backend.summarization.SummarizationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,10 +39,11 @@ public class LessonController {
     }
 
     // ── GET /lessons ──────────────────────────────────────────────────────
-    // Returns all lessons as LessonResponse DTOs (no audioPath exposed).
+    // Returns all lessons belonging to the authenticated user as LessonResponse
+    // DTOs (no audioPath exposed).
     @GetMapping
-    public List<LessonResponse> getAllLessons() {
-        return lessonService.findAll()
+    public List<LessonResponse> getAllLessons(@AuthenticationPrincipal Long userId) {
+        return lessonService.findAllByUserId(userId)
                 .stream()
                 .map(lesson -> LessonResponse.from(lesson, objectMapper))
                 .toList();
@@ -49,8 +51,11 @@ public class LessonController {
 
     // ── GET /lessons/{id} ─────────────────────────────────────────────────
     @GetMapping("/{id}")
-    public LessonResponse getLesson(@PathVariable Long id) {
-        return LessonResponse.from(lessonService.findById(id), objectMapper);
+    public LessonResponse getLesson(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Long userId
+    ) {
+        return LessonResponse.from(lessonService.findByIdForUser(id, userId), objectMapper);
     }
 
     // ── POST /lessons ─────────────────────────────────────────────────────
@@ -61,9 +66,13 @@ public class LessonController {
     // Request body: { "title": "...", "recordedAt": "2024-11-04T10:00:00Z", "durationMs": 180000 }
     // Response 201: LessonResponse (transcriptStatus: "PENDING", transcript: null)
     @PostMapping
-    public ResponseEntity<LessonResponse> createLesson(@RequestBody CreateLessonRequest request) {
+    public ResponseEntity<LessonResponse> createLesson(
+            @RequestBody CreateLessonRequest request,
+            @AuthenticationPrincipal Long userId
+    ) {
         Instant recordedAt = Instant.parse(request.recordedAt());
         Lesson created = lessonService.createLesson(
+                userId,
                 request.title(),
                 recordedAt,
                 request.durationMs()
@@ -78,9 +87,10 @@ public class LessonController {
     @PostMapping("/{id}/audio")
     public ResponseEntity<Map<String, Object>> uploadAudio(
             @PathVariable Long id,
-            @RequestParam("audio") MultipartFile audio
+            @RequestParam("audio") MultipartFile audio,
+            @AuthenticationPrincipal Long userId
     ) throws IOException {
-        Path savedPath = lessonService.saveAudio(id, audio);
+        Path savedPath = lessonService.saveAudio(id, userId, audio);
         lessonService.transcribeAsync(id, savedPath);  // returns immediately; runs in background
 
         return ResponseEntity.accepted().body(Map.of(
@@ -104,7 +114,14 @@ public class LessonController {
     // Returns 422 if transcription is not complete or the transcript is blank.
     // Returns 409 if summarization is already running or already succeeded.
     @PostMapping("/{id}/summarize")
-    public ResponseEntity<Map<String, Object>> requestSummarization(@PathVariable Long id) {
+    public ResponseEntity<Map<String, Object>> requestSummarization(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Long userId
+    ) {
+        // Ownership check: returns 404 if the lesson is missing or belongs to
+        // another user, before any summarization work begins.
+        lessonService.findByIdForUser(id, userId);
+
         summarizationService.requestSummarization(id);     // validates + sets PENDING (synchronous, @Transactional)
         summarizationService.summarizeAsync(id);            // calls Claude in a background thread (@Async)
         return ResponseEntity.accepted().body(Map.of(

@@ -1,12 +1,17 @@
 package com.pianolesson.backend.lesson;
 
+import com.pianolesson.backend.user.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -28,6 +33,15 @@ public class Lesson {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    // The user who owns this lesson.  LAZY loading means Hibernate does not
+    // fetch the User row unless getUser() is explicitly called — a plain
+    // findById(lessonId) stays a single-table query.  optional = false tells
+    // Hibernate (and the schema) that this column can never be NULL.
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false,
+                foreignKey = @ForeignKey(name = "fk_lessons_user"))
+    private User user;
 
     @Column(nullable = false)
     private String title;
@@ -84,7 +98,8 @@ public class Lesson {
     // because application code should use the other constructor.
     protected Lesson() {}
 
-    public Lesson(String title, Instant recordedAt, long durationMs) {
+    public Lesson(User user, String title, Instant recordedAt, long durationMs) {
+        this.user = user;
         this.title = title;
         this.recordedAt = recordedAt;
         this.durationMs = durationMs;
@@ -95,6 +110,8 @@ public class Lesson {
     // ── Getters and setters ───────────────────────────────────────────────
 
     public Long getId() { return id; }
+
+    public User getUser() { return user; }
 
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }

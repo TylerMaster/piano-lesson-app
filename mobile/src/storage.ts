@@ -265,3 +265,13 @@ export async function renameLesson(
 
   await persistLessons(updatedLessons);
 }
+
+// Permanently removes all local lesson audio files and their metadata.
+// Deletes the Audio directory first so that if the metadata removal fails,
+// the orphan recovery UI can still surface the surviving files.
+// Has no effect on backend records or on the auth token in SecureStore.
+export async function clearAllLocalLessons(): Promise<void> {
+  const audioDir = `${FileSystem.documentDirectory}Audio/`;
+  await FileSystem.deleteAsync(audioDir, { idempotent: true });
+  await AsyncStorage.removeItem(KEY);
+}

@@ -1,5 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
+import { AuthProvider } from './src/auth/AuthContext';
+import AuthGate from './src/auth/AuthGate';
 import {
   SafeAreaView,
   ScrollView,
@@ -12,7 +14,7 @@ import RecordingScreen from './src/RecordingScreen';
 import type { Lesson } from './src/types';
 import { validateAndLoadLessons, updateMissingDurations, findOrphanedRecordings } from './src/storage';
 import {   debugStorage,
-  recoverRecording, deleteLesson, renameLesson } from './src/storage';
+  recoverRecording, deleteLesson, renameLesson, clearAllLocalLessons } from './src/storage';
   import { getRecordingDuration} from './src/storage';
   import PlaybackScreen from './src/PlaybackScreen';
 import CalendarView from './src/CalendarView';
@@ -24,6 +26,9 @@ import {
 } from 'react-native';
 
 type Screen = 'home' | 'recording';
+
+// Set to false and remove the button once the one-time local data cleanup is done.
+const DEV_SHOW_CLEAR_BUTTON = true;
 
 
 
@@ -104,11 +109,22 @@ function LessonItem({
 }
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate>
+        <AppContent />
+      </AuthGate>
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
   const [screen, setScreen] = useState<Screen>('home');
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [orphanedRecordings, setOrphanedRecordings] = useState<string[]>([]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [homeView, setHomeView] = useState<'list' | 'calendar'>('list');
+  const [isClearing, setIsClearing] = useState(false);
 
   // On startup: load persisted lessons and verify each file still exists.
   // validateAndLoadLessons removes stale entries and re-saves the cleaned list.
@@ -197,6 +213,33 @@ async function handleDeleteLesson(lesson: Lesson) {
   }
 }
 
+
+  async function handleClearLocalData() {
+    Alert.alert(
+      'Clear local recordings?',
+      'This permanently deletes all pre-account audio files and lesson metadata from this device. Backend records and your account are not affected. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: async () => {
+            setIsClearing(true);
+            try {
+              await clearAllLocalLessons();
+              setLessons([]);
+              setOrphanedRecordings([]);
+            } catch (error) {
+              console.error('[Cleanup] Failed:', error);
+              Alert.alert('Cleanup failed', 'Something went wrong. Please try again.');
+            } finally {
+              setIsClearing(false);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   if (screen === 'recording') {
     return (
@@ -350,6 +393,19 @@ async function handleDeleteLesson(lesson: Lesson) {
             </View>
           )}
         </View>
+
+        {DEV_SHOW_CLEAR_BUTTON && (
+          <TouchableOpacity
+            style={[styles.devClearButton, isClearing && styles.devClearButtonDisabled]}
+            onPress={handleClearLocalData}
+            disabled={isClearing}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.devClearButtonText}>
+              {isClearing ? 'Clearing…' : 'Clear Pre-Account Local Data'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -555,5 +611,22 @@ deleteButtonText: {
   },
   toggleTextActive: {
     color: '#111111',
+  },
+
+  devClearButton: {
+    marginTop: 32,
+    borderWidth: 1,
+    borderColor: '#FF453A',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  devClearButtonDisabled: {
+    opacity: 0.5,
+  },
+  devClearButtonText: {
+    fontSize: 14,
+    color: '#FF453A',
+    fontWeight: '600',
   },
 });
