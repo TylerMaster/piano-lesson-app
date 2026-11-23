@@ -40,7 +40,7 @@ export default function PlaybackScreen({
   onRename,
   onLessonUpdate,
 }: PlaybackScreenProps) {
-  const { token } = useAuth();
+  const { token, userId } = useAuth();
 
   // ── Audio player ────────────────────────────────────────────────────────
   const player = useAudioPlayer(lesson.uri);
@@ -120,8 +120,10 @@ export default function PlaybackScreen({
             summaryStatus: result.summaryStatus,
             ...(result.summary != null && { summary: result.summary }),
           };
-          updateLesson(lesson.id, updates)
-            .catch(e => console.warn('[Transcription] Could not save DONE locally:', e));
+          if (userId !== null) {
+            updateLesson(userId, lesson.id, updates)
+              .catch(e => console.warn('[Transcription] Could not save DONE locally:', e));
+          }
           onLessonUpdate?.({ ...lesson, backendId: initId, ...updates });
 
           if (result.summaryStatus === 'PENDING' || result.summaryStatus === 'PROCESSING') {
@@ -178,8 +180,10 @@ export default function PlaybackScreen({
             transcriptStatus: result.transcriptStatus,
             ...(result.transcript != null && { transcript: result.transcript }),
           };
-          updateLesson(lesson.id, updates)
-            .catch(e => console.warn('[Polling] Could not persist final status:', e));
+          if (userId !== null) {
+            updateLesson(userId, lesson.id, updates)
+              .catch(e => console.warn('[Polling] Could not persist final status:', e));
+          }
           onLessonUpdate?.({
             ...lesson,
             backendId: id,
@@ -233,8 +237,10 @@ export default function PlaybackScreen({
             summaryStatus: result.summaryStatus,
             ...(result.summary != null && { summary: result.summary }),
           };
-          updateLesson(lesson.id, updates)
-            .catch(e => console.warn('[SummaryPolling] Could not persist final status:', e));
+          if (userId !== null) {
+            updateLesson(userId, lesson.id, updates)
+              .catch(e => console.warn('[SummaryPolling] Could not persist final status:', e));
+          }
           onLessonUpdate?.({
             ...lesson,
             backendId: id,
@@ -258,7 +264,7 @@ export default function PlaybackScreen({
   // ── Upload / submit ─────────────────────────────────────────────────────
 
   async function handleSubmit() {
-    if (isSubmitting) return;
+    if (isSubmitting || userId === null) return;
     // Stop any existing polling loop before starting a new upload sequence.
     // This covers both normal retries (from FAILED — no active poll) and
     // forced retries (from PROCESSING — poll is running and must be cleared
@@ -280,7 +286,7 @@ export default function PlaybackScreen({
         const newId = await registerLesson(token!, lesson);
         currentBackendId = newId;
         setBackendId(newId);
-        await updateLesson(lesson.id, { backendId: newId });
+        await updateLesson(userId, lesson.id, { backendId: newId });
         onLessonUpdate?.({ ...lesson, backendId: newId });
       }
 
@@ -291,7 +297,7 @@ export default function PlaybackScreen({
       // Step 3 — Reflect PROCESSING locally so the UI updates immediately
       // rather than waiting for the first poll tick.
       setTranscriptStatus('PROCESSING');
-      await updateLesson(lesson.id, { transcriptStatus: 'PROCESSING' });
+      await updateLesson(userId, lesson.id, { transcriptStatus: 'PROCESSING' });
       onLessonUpdate?.({ ...lesson, backendId: currentBackendId, transcriptStatus: 'PROCESSING' });
 
       // Step 4 — Start polling for DONE / FAILED.
@@ -321,7 +327,7 @@ export default function PlaybackScreen({
   // ── Summarize ───────────────────────────────────────────────────────────
 
   async function handleSummarize() {
-    if (isSummarizing || !backendId) return;
+    if (isSummarizing || !backendId || userId === null) return;
     stopSummaryPolling();
     setIsSummarizing(true);
     setSummaryError(null);
@@ -331,7 +337,7 @@ export default function PlaybackScreen({
     try {
       await requestLessonSummary(token!, id);
       setSummaryStatus('PENDING');
-      await updateLesson(lesson.id, { summaryStatus: 'PENDING' });
+      await updateLesson(userId, lesson.id, { summaryStatus: 'PENDING' });
       onLessonUpdate?.({ ...lesson, backendId: id, summaryStatus: 'PENDING' });
       startSummaryPolling(id);
     } catch (err) {
@@ -352,13 +358,13 @@ export default function PlaybackScreen({
               summaryStatus: result.summaryStatus,
               summary: result.summary ?? undefined,
             };
-            await updateLesson(lesson.id, updates);
+            await updateLesson(userId, lesson.id, updates);
             onLessonUpdate?.({ ...lesson, backendId: id, ...updates });
           } else if (
             result.summaryStatus === 'PENDING' ||
             result.summaryStatus === 'PROCESSING'
           ) {
-            await updateLesson(lesson.id, { summaryStatus: result.summaryStatus });
+            await updateLesson(userId, lesson.id, { summaryStatus: result.summaryStatus });
             onLessonUpdate?.({ ...lesson, backendId: id, summaryStatus: result.summaryStatus });
             startSummaryPolling(id);
           }

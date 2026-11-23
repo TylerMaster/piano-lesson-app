@@ -11,18 +11,20 @@ interface Props {
   children: React.ReactNode;
 }
 
-// Renders auth screens when no token is present, or the main app when signed in.
+// Renders auth screens when no token or userId is present, or the main app
+// when fully signed in. Both must be non-null before the app is shown — a
+// token without a userId cannot safely reach storage functions.
 // Auth screen navigation (login ↔ register) is local to this component and
 // completely separate from the main app's screen state.
 export default function AuthGate({ children }: Props) {
-  const { token, isLoading } = useAuth();
+  const { token, userId, isLoading } = useAuth();
   const [authScreen, setAuthScreen] = useState<AuthScreen>('login');
 
   useEffect(() => {
-    if (!isLoading && !token) {
+    if (!isLoading && (!token || userId === null)) {
       setAuthScreen('login');
     }
-  }, [token, isLoading]);
+  }, [token, userId, isLoading]);
 
   // Hold off rendering while SecureStore resolves the persisted token —
   // avoids a flash of the login screen on startup for returning users.
@@ -30,7 +32,7 @@ export default function AuthGate({ children }: Props) {
     return null;
   }
 
-  if (!token) {
+  if (!token || userId === null) {
     if (authScreen === 'register') {
       return (
         <RegisterScreen

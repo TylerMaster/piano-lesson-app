@@ -14,11 +14,12 @@ import {
   requestRecordingPermissionsAsync,
   useAudioRecorder,
 } from 'expo-audio';
-import { addLesson, findOrphanedRecordings } from './storage';
+import { addLesson, findOrphanedRecordings, moveRecordingToUserDirectory } from './storage';
 import type { Lesson } from './types';
 
 interface Props {
   onDismiss: (lesson?: Lesson) => void;
+  userId: number;
 }
 
 type PermStatus = 'checking' | 'undetermined' | 'granted' | 'denied';
@@ -40,7 +41,7 @@ function formatElapsed(ms: number): string {
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export default function RecordingScreen({ onDismiss }: Props) {
+export default function RecordingScreen({ onDismiss, userId }: Props) {
   const [permStatus, setPermStatus] = useState<PermStatus>('checking');
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -74,8 +75,8 @@ export default function RecordingScreen({ onDismiss }: Props) {
   }, [isRecording]);
 
 useEffect(() => {
-  findOrphanedRecordings();
-}, []);
+  findOrphanedRecordings(userId);
+}, [userId]);
 
   // Mark the component as unmounted so async callbacks won't set state
   // on a dead component.
@@ -130,12 +131,13 @@ useEffect(() => {
 
       try {
         await recorder.stop();
-        const uri = recorder.uri;
-        console.log('[RecordingScreen] Saved recording URI:', uri);
-        if (uri) {
-          await addLesson({
+        const sourceUri = recorder.uri;
+        console.log('[RecordingScreen] Raw recording URI:', sourceUri);
+        if (sourceUri) {
+          const destUri = await moveRecordingToUserDirectory(userId, sourceUri);
+          await addLesson(userId, {
             id: Date.now().toString(),
-            uri,
+            uri: destUri,
             date: new Date().toISOString(),
             durationMs,
             title: 'Practice Session'
@@ -205,8 +207,8 @@ useEffect(() => {
 
     try {
       await recorder.stop();
-      const uri = recorder.uri;
-      if (!uri) {
+      const sourceUri = recorder.uri;
+      if (!sourceUri) {
         if (isMountedRef.current) {
           setError('No audio was captured. Please try again.');
           setIsSaving(false);
@@ -214,14 +216,21 @@ useEffect(() => {
         }
         return;
       }
+
+      // Move the completed recording from the recorder's shared drop location
+      // into this account's private directory (Audio/<userId>/) before saving
+      // the lesson. If the move fails the catch block fires and no lesson is
+      // saved, so we never store a URI pointing to a shared or temporary path.
+      const destUri = await moveRecordingToUserDirectory(userId, sourceUri);
+
       const lesson: Lesson = {
         id: Date.now().toString(),
-        uri,
+        uri: destUri,
         date: new Date().toISOString(),
         durationMs,
         title: 'Practice Session'
       };
-      await addLesson(lesson);
+      await addLesson(userId, lesson);
       if (!isMountedRef.current) return; // unmounted while saving
       setIsRecording(false);
       onDismiss(lesson);

@@ -5,7 +5,7 @@ import React, {
   useEffect,
   useState,
 } from 'react';
-import { clearToken, getToken, saveToken } from './authStorage';
+import { clearToken, clearUserId, getToken, getUserId, saveToken, saveUserId } from './authStorage';
 import {
   login as apiLogin,
   register as apiRegister,
@@ -37,13 +37,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
   });
 
-  // On mount, restore a previously saved token from secure storage.
-  // The token is not re-validated here; the first protected API call will
-  // fail with 401 if it has expired, at which point the app can log out.
+  // On mount, restore the token and userId persisted from the previous session.
+  // userId is stored separately in SecureStore alongside the token. If a token
+  // exists but userId is missing (e.g. corrupted SecureStore, partial write),
+  // the credentials are unusable — clear both and require the user to log in
+  // again rather than entering the app with a null userId.
   useEffect(() => {
-    getToken()
-      .then((token) => {
-        setState({ token, userId: null, email: null, isLoading: false });
+    Promise.all([getToken(), getUserId()])
+      .then(([token, userId]) => {
+        if (token !== null && userId === null) {
+          return Promise.all([clearToken(), clearUserId()]).then(() => {
+            setState({ token: null, userId: null, email: null, isLoading: false });
+          });
+        }
+        setState({ token, userId, email: null, isLoading: false });
       })
       .catch(() => {
         setState((prev) => ({ ...prev, isLoading: false }));
@@ -52,7 +59,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const data = await apiLogin(email, password);
-    await saveToken(data.token);
+    // Persist token and userId atomically: if either save fails, clear both
+    // so we never store a token without its matching userId (or vice versa).
+    try {
+      await saveToken(data.token);
+      await saveUserId(data.userId);
+    } catch (err) {
+      await Promise.all([clearToken(), clearUserId()]).catch(() => {});
+      throw err;
+    }
     setState({
       token: data.token,
       userId: data.userId,
@@ -66,7 +81,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (email: string, password: string) => {
     await apiRegister(email, password);
     const data = await apiLogin(email, password);
-    await saveToken(data.token);
+    try {
+      await saveToken(data.token);
+      await saveUserId(data.userId);
+    } catch (err) {
+      await Promise.all([clearToken(), clearUserId()]).catch(() => {});
+      throw err;
+    }
     setState({
       token: data.token,
       userId: data.userId,
@@ -77,9 +98,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await clearToken();
+      await Promise.all([clearToken(), clearUserId()]);
     } catch (err) {
-      console.warn('[Auth] clearToken failed during logout:', err);
+      console.warn('[Auth] Failed to clear stored credentials during logout:', err);
     }
     setState({ token: null, userId: null, email: null, isLoading: false });
   }, []);

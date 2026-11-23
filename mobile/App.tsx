@@ -12,11 +12,9 @@ import {
 } from 'react-native';
 import RecordingScreen from './src/RecordingScreen';
 import type { Lesson } from './src/types';
-import { validateAndLoadLessons, updateMissingDurations, findOrphanedRecordings } from './src/storage';
-import {   debugStorage,
-  recoverRecording, deleteLesson, renameLesson, clearAllLocalLessons } from './src/storage';
-  import { getRecordingDuration} from './src/storage';
-  import PlaybackScreen from './src/PlaybackScreen';
+import { updateMissingDurations, findOrphanedRecordings } from './src/storage';
+import { recoverRecording, deleteLesson, renameLesson, clearAllLocalLessons } from './src/storage';
+import PlaybackScreen from './src/PlaybackScreen';
 import CalendarView from './src/CalendarView';
 import ChangePasswordScreen from './src/auth/ChangePasswordScreen';
   import { COLORS } from './src/constants/theme';
@@ -120,7 +118,14 @@ export default function App() {
 }
 
 function AppContent() {
-  const { logout } = useAuth();
+  const { logout, userId } = useAuth();
+
+  // AuthGate renders AppContent only when both token and userId are non-null,
+  // so this guard should never fire. It is here as a runtime safety net to
+  // prevent any future regression from reaching storage functions with a null
+  // userId. Returning null re-shows the loading placeholder.
+  if (userId === null) return null;
+  const uid = userId;
   const [screen, setScreen] = useState<Screen>('home');
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [orphanedRecordings, setOrphanedRecordings] = useState<string[]>([]);
@@ -131,13 +136,9 @@ function AppContent() {
   // On startup: load persisted lessons and verify each file still exists.
   // validateAndLoadLessons removes stale entries and re-saves the cleaned list.
   useEffect(() => {
-    debugStorage();
-    //validateAndLoadLessons().then(setLessons);
-    updateMissingDurations().then(setLessons);
-    findOrphanedRecordings().then(setOrphanedRecordings);
-
-
-  }, []);
+    updateMissingDurations(uid).then(setLessons);
+    findOrphanedRecordings(uid).then(setOrphanedRecordings);
+  }, [uid]);
 
 
 
@@ -153,7 +154,7 @@ function AppContent() {
 
 const handleRecoverRecording = useCallback(async (uri: string) => {
   try {
-    const recoveredLesson = await recoverRecording(uri);
+    const recoveredLesson = await recoverRecording(uid, uri);
 
     setLessons((prev) => [recoveredLesson, ...prev]);
 
@@ -163,7 +164,7 @@ const handleRecoverRecording = useCallback(async (uri: string) => {
   } catch (error) {
     console.error('[Recovery] Failed to recover recording:', error);
   }
-}, []);
+}, [uid]);
 
 
 async function handleRenameLesson(
@@ -171,7 +172,7 @@ async function handleRenameLesson(
   newTitle: string
 ) {
   try {
-    await renameLesson(lessonId, newTitle);
+    await renameLesson(uid, lessonId, newTitle);
 
     setLessons((previousLessons) =>
       previousLessons.map((lesson) =>
@@ -200,7 +201,7 @@ async function handleRenameLesson(
 
 async function handleDeleteLesson(lesson: Lesson) {
   try {
-    await deleteLesson(lesson);
+    await deleteLesson(uid, lesson);
 
     setLessons((previousLessons) =>
       previousLessons.filter((item) => item.id !== lesson.id)
@@ -239,7 +240,7 @@ async function handleDeleteLesson(lesson: Lesson) {
           onPress: async () => {
             setIsClearing(true);
             try {
-              await clearAllLocalLessons();
+              await clearAllLocalLessons(uid);
               setLessons([]);
               setOrphanedRecordings([]);
             } catch (error) {
@@ -258,7 +259,7 @@ async function handleDeleteLesson(lesson: Lesson) {
     return (
       <SafeAreaView style={styles.root}>
         <StatusBar style="light" />
-        <RecordingScreen onDismiss={handleRecordingDone} />
+        <RecordingScreen onDismiss={handleRecordingDone} userId={uid} />
       </SafeAreaView>
     );
   }
