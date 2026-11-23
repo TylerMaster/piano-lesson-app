@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
-import { AuthProvider } from './src/auth/AuthContext';
+import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import AuthGate from './src/auth/AuthGate';
 import {
   SafeAreaView,
@@ -18,6 +18,7 @@ import {   debugStorage,
   import { getRecordingDuration} from './src/storage';
   import PlaybackScreen from './src/PlaybackScreen';
 import CalendarView from './src/CalendarView';
+import ChangePasswordScreen from './src/auth/ChangePasswordScreen';
   import { COLORS } from './src/constants/theme';
 import { formatDate } from './src/utils/formatDate';
 import {
@@ -25,7 +26,7 @@ import {
   // keep your other existing imports
 } from 'react-native';
 
-type Screen = 'home' | 'recording';
+type Screen = 'home' | 'recording' | 'change-password';
 
 // Set to false and remove the button once the one-time local data cleanup is done.
 const DEV_SHOW_CLEAR_BUTTON = true;
@@ -119,6 +120,7 @@ export default function App() {
 }
 
 function AppContent() {
+  const { logout } = useAuth();
   const [screen, setScreen] = useState<Screen>('home');
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [orphanedRecordings, setOrphanedRecordings] = useState<string[]>([]);
@@ -214,6 +216,17 @@ async function handleDeleteLesson(lesson: Lesson) {
 }
 
 
+  function handleLogout() {
+    Alert.alert(
+      'Log out?',
+      'You will need to sign in again to access your lessons.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log Out', style: 'destructive', onPress: logout },
+      ]
+    );
+  }
+
   async function handleClearLocalData() {
     Alert.alert(
       'Clear local recordings?',
@@ -268,6 +281,10 @@ async function handleDeleteLesson(lesson: Lesson) {
   );
 }
 
+  if (screen === 'change-password') {
+    return <ChangePasswordScreen onBack={() => setScreen('home')} />;
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
@@ -276,8 +293,25 @@ async function handleDeleteLesson(lesson: Lesson) {
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.header}>
-          <Text style={styles.appTitle}>Piano Lesson</Text>
-          <Text style={styles.appTitleAccent}>Companion</Text>
+          <View>
+            <Text style={styles.appTitle}>Piano Lesson</Text>
+            <Text style={styles.appTitleAccent}>Companion</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={handleLogout}
+              activeOpacity={0.7}
+              style={styles.logoutButton}
+            >
+              <Text style={styles.logoutButtonText}>Log out</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setScreen('change-password')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.changePasswordText}>Change password</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -428,6 +462,25 @@ const styles = StyleSheet.create({
   // Header
   header: {
     marginBottom: 48,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerActions: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  logoutButton: {
+    paddingTop: 6,
+  },
+  logoutButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+  },
+  changePasswordText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
   },
   appTitle: {
     fontSize: 36,

@@ -52,7 +52,9 @@ public class SecurityConfig {
 
             .authorizeHttpRequests(auth -> auth
                 // Registration and login must be reachable without a token.
-                .requestMatchers(HttpMethod.POST, "/auth/register", "/auth/login").permitAll()
+                .requestMatchers(HttpMethod.POST,
+                        "/auth/register", "/auth/login",
+                        "/auth/forgot-password", "/auth/reset-password").permitAll()
                 // Spring Boot forwards to /error on response.sendError() — e.g. when
                 // ResponseStatusException is thrown.  Without this, the error dispatch
                 // runs without a SecurityContext (JwtAuthenticationFilter skips error

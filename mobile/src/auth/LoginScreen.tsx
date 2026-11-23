@@ -18,9 +18,10 @@ import { useAuth } from './AuthContext';
 
 interface Props {
   onNavigateToRegister: () => void;
+  onNavigateToForgotPassword: () => void;
 }
 
-export default function LoginScreen({ onNavigateToRegister }: Props) {
+export default function LoginScreen({ onNavigateToRegister, onNavigateToForgotPassword }: Props) {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -101,6 +102,8 @@ export default function LoginScreen({ onNavigateToRegister }: Props) {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
                 autoComplete="current-password"
                 placeholder="••••••••"
                 placeholderTextColor={COLORS.textMuted}
@@ -122,6 +125,16 @@ export default function LoginScreen({ onNavigateToRegister }: Props) {
               </Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={styles.switchLink}
+            onPress={onNavigateToForgotPassword}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.switchText}>
+              <Text style={styles.switchTextAccent}>Forgot password?</Text>
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.switchLink}

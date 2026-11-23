@@ -126,6 +126,12 @@ async def transcribe(audio: UploadFile = File(...)):
                     str(vocals_path),
                     language="en",
                     fp16=False,
+		initial_prompt=(
+        "This is a piano lesson. Musical terms may include rubato, "
+        "legato, staccato, portato, crescendo, diminuendo, "
+        "fortissimo, pianissimo, arpeggio, fermata, tempo, "
+        "dynamics, articulation, phrasing, and pedal."
+    ),
                 )
             except Exception as exc:
                 raise HTTPException(

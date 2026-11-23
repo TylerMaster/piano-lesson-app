@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
+import ForgotPasswordScreen from './ForgotPasswordScreen';
 import LoginScreen from './LoginScreen';
 import RegisterScreen from './RegisterScreen';
+import ResetPasswordScreen from './ResetPasswordScreen';
 
-type AuthScreen = 'login' | 'register';
+type AuthScreen = 'login' | 'register' | 'forgot-password' | 'reset-password';
 
 interface Props {
   children: React.ReactNode;
@@ -36,9 +38,25 @@ export default function AuthGate({ children }: Props) {
         />
       );
     }
+    if (authScreen === 'forgot-password') {
+      return (
+        <ForgotPasswordScreen
+          onBack={() => setAuthScreen('login')}
+          onNavigateToResetPassword={() => setAuthScreen('reset-password')}
+        />
+      );
+    }
+    if (authScreen === 'reset-password') {
+      return (
+        <ResetPasswordScreen
+          onBack={() => setAuthScreen('login')}
+        />
+      );
+    }
     return (
       <LoginScreen
         onNavigateToRegister={() => setAuthScreen('register')}
+        onNavigateToForgotPassword={() => setAuthScreen('forgot-password')}
       />
     );
   }

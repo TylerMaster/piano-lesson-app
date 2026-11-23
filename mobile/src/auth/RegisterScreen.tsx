@@ -108,6 +108,8 @@ export default function RegisterScreen({ onNavigateToLogin }: Props) {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
                 autoComplete="new-password"
                 placeholder="At least 8 characters"
                 placeholderTextColor={COLORS.textMuted}
@@ -121,6 +123,8 @@ export default function RegisterScreen({ onNavigateToLogin }: Props) {
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
                 autoComplete="new-password"
                 placeholder="••••••••"
                 placeholderTextColor={COLORS.textMuted}

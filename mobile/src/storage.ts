@@ -98,6 +98,18 @@ export async function findOrphanedRecordings(): Promise<string[]> {
     // Locate the Audio folder independently of saved lesson metadata.
     const audioDirectory = `${documentDirectory}Audio/`;
 
+    const dirInfo = await FileSystem.getInfoAsync(audioDirectory);
+
+    if (!dirInfo.exists) {
+      console.log('[Recovery] Audio directory does not exist yet; skipping scan.');
+      return [];
+    }
+
+    if (!dirInfo.isDirectory) {
+      console.log('[Recovery] Audio path exists but is not a directory; skipping scan.');
+      return [];
+    }
+
     const files = await FileSystem.readDirectoryAsync(audioDirectory);
 
     // Build a list of URIs already referenced by saved lessons.

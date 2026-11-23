@@ -3,6 +3,7 @@ package com.pianolesson.backend.summarization;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pianolesson.backend.lesson.Lesson;
 import com.pianolesson.backend.lesson.LessonRepository;
+import com.pianolesson.backend.user.User;
 import com.pianolesson.backend.lesson.SummaryStatus;
 import com.pianolesson.backend.lesson.TranscriptStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,8 +54,10 @@ class SummarizationServiceTest {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private static final User TEST_USER = new User("test@example.com", "hash");
+
     private Lesson doneLesson() {
-        Lesson lesson = new Lesson("Test Lesson", Instant.now(), 60_000L);
+        Lesson lesson = new Lesson(TEST_USER, "Test Lesson", Instant.now(), 60_000L);
         lesson.setTranscriptStatus(TranscriptStatus.DONE);
         lesson.setTranscript("Teacher said: you are rushing the left-hand passage.");
         lesson.setSummaryStatus(SummaryStatus.NOT_REQUESTED);
@@ -79,7 +82,7 @@ class SummarizationServiceTest {
 
     @Test
     void requestSummarization_transcriptNotDone_throws422() {
-        Lesson lesson = new Lesson("Test", Instant.now(), 60_000L);
+        Lesson lesson = new Lesson(TEST_USER, "Test", Instant.now(), 60_000L);
         lesson.setTranscriptStatus(TranscriptStatus.PENDING);
         when(lessonRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(lesson));
 
@@ -91,7 +94,7 @@ class SummarizationServiceTest {
 
     @Test
     void requestSummarization_blankTranscript_throws422() {
-        Lesson lesson = new Lesson("Test", Instant.now(), 60_000L);
+        Lesson lesson = new Lesson(TEST_USER, "Test", Instant.now(), 60_000L);
         lesson.setTranscriptStatus(TranscriptStatus.DONE);
         lesson.setTranscript("   ");
         when(lessonRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(lesson));

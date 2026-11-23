@@ -1,7 +1,9 @@
 package com.pianolesson.backend.user;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Locale;
 
@@ -53,5 +55,25 @@ public class UserService {
 
         String token = jwtService.generateToken(user.getId());
         return new LoginResponse(user.getId(), user.getEmail(), token, "Bearer");
+    }
+
+    public void changePassword(Long userId, ChangePasswordRequest request) {
+        // userId comes from the verified JWT, never from the request body.
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found."));
+
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect.");
+        }
+
+        // Prevent a no-op change that might mislead the user into thinking their
+        // password was updated when nothing actually changed.
+        if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "New password must be different from the current password.");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
     }
 }

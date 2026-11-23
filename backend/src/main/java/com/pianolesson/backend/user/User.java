@@ -81,9 +81,11 @@ public class User {
     public String getEmail() { return email; }
 
     // passwordHash is intentionally omitted from API response DTOs.
-    // The getter is package-private so only classes in this package
-    // (e.g. a future UserService) can access the hash value.
+    // Getter and setter are package-private so only classes in this package
+    // can read or update the hash value.
     String getPasswordHash() { return passwordHash; }
+
+    void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
     public Instant getCreatedAt() { return createdAt; }
 
