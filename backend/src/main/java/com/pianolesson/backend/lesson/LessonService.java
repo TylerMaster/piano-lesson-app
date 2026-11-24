@@ -115,19 +115,39 @@ public class LessonService {
 
     @Transactional
     public Path saveAudio(Long lessonId, Long userId, MultipartFile file) throws IOException {
-        Lesson lesson = findByIdForUser(lessonId, userId);
+        // The ownership check and the status gate must be atomic. Using the
+        // pessimistic write lock means two simultaneous upload requests for the
+        // same lesson are serialized: the second blocks until the first commits,
+        // then reads PROCESSING and receives a 409 instead of launching a
+        // duplicate transcription job.
+        Lesson lesson = lessonRepository.findByIdAndUser_IdForUpdate(lessonId, userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Lesson " + lessonId + " not found"));
+
+        TranscriptStatus current = lesson.getTranscriptStatus();
+        switch (current) {
+            case PROCESSING -> throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Transcription is already in progress for lesson " + lessonId);
+            case DONE -> throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Transcription is already complete for lesson " + lessonId
+                            + ". The existing transcript will not be overwritten.");
+            default -> { /* PENDING or FAILED — both eligible for a (re)upload */ }
+        }
+
+        // Clear any partial transcript from a previous failed attempt before
+        // accepting new audio, so the retry starts from a clean state.
+        if (current == TranscriptStatus.FAILED) {
+            lesson.setTranscript(null);
+        }
 
         Path lessonDir = audioStorageRoot.resolve(String.valueOf(lessonId));
         Files.createDirectories(lessonDir);
 
-        // FIX: sanitize the filename before resolving it against lessonDir.
-        //
-        // MultipartFile.getOriginalFilename() returns whatever the client sent,
-        // which could include path separators like "../../etc/passwd".
-        // Path.of(name).getFileName() strips all directory components and
-        // returns only the final filename component, preventing path traversal.
-        //
-        // Example: "../../evil.sh" → getFileName() → "evil.sh" → safe.
+        // Sanitize the filename before resolving it against lessonDir.
+        // Path.of(name).getFileName() strips directory components, preventing
+        // path traversal (e.g. "../../etc/passwd" → "passwd" → rejected below).
         String rawName = file.getOriginalFilename();
         String safeName = "audio.bin";
         if (rawName != null && !rawName.isBlank()) {
@@ -141,6 +161,7 @@ public class LessonService {
         file.transferTo(destination);
 
         lesson.setAudioPath(destination.toString());
+        lesson.setTranscriptStatus(TranscriptStatus.PROCESSING);
         lessonRepository.save(lesson);
 
         return destination;
@@ -166,15 +187,14 @@ public class LessonService {
     // status becomes visible to other clients as soon as the first save() returns.
     @Async
     public void transcribeAsync(Long lessonId, Path audioPath) {
-        // findById runs its own short @Transactional internally and returns a
-        // detached entity.  We modify and re-save it in short bursts below.
+        // PROCESSING was already committed by saveAudio() before this method runs,
+        // so there is no need to set it again here. Each save() below opens its
+        // own short JPA transaction and commits immediately so the status is
+        // visible to polling clients as soon as the write returns.
         Lesson lesson = findById(lessonId);
+        log.info("[Transcription] Started for lesson {}", lessonId);
 
         try {
-            lesson.setTranscriptStatus(TranscriptStatus.PROCESSING);
-            lesson = lessonRepository.save(lesson);  // committed immediately — visible now
-            log.info("[Transcription] Started for lesson {}", lessonId);
-
             TranscriptionClient.TranscriptionResponse response =
                     transcriptionClient.transcribe(audioPath);
 

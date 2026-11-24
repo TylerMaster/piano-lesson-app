@@ -58,4 +58,12 @@ public interface LessonRepository extends JpaRepository<Lesson, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT l FROM Lesson l WHERE l.id = :id")
     Optional<Lesson> findByIdForUpdate(@Param("id") Long id);
+
+    // Same as findByIdForUpdate but also enforces ownership in the same locked
+    // query.  Used by saveAudio() so that the ownership check and the
+    // duplicate-upload gate happen atomically — no gap between verifying
+    // ownership and acquiring the row lock.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM Lesson l WHERE l.id = :id AND l.user.id = :userId")
+    Optional<Lesson> findByIdAndUser_IdForUpdate(@Param("id") Long id, @Param("userId") Long userId);
 }

@@ -308,6 +308,42 @@ export default function PlaybackScreen({
 
       console.error('[Upload] Error:', err);
 
+      if (err instanceof ApiError && err.status === 409 && currentBackendId !== null) {
+        // The backend rejected the upload because a transcription job is already
+        // running or has already completed for this lesson. Fetch the current
+        // status so we can resume the right UI state without leaving the user stuck.
+        try {
+          const result = await fetchLessonStatus(token!, currentBackendId);
+          if (!isMountedRef.current) return;
+          setTranscriptStatus(result.transcriptStatus);
+          if (result.transcript != null) setTranscript(result.transcript);
+          setSummaryStatus(result.summaryStatus);
+          if (result.summary != null) setSummary(result.summary);
+          const updates = {
+            transcriptStatus: result.transcriptStatus,
+            transcript: result.transcript ?? undefined,
+            summaryStatus: result.summaryStatus,
+            ...(result.summary != null && { summary: result.summary }),
+          };
+          if (userId !== null) {
+            updateLesson(userId, lesson.id, updates)
+              .catch(e => console.warn('[Upload] Could not persist 409 status locally:', e));
+          }
+          onLessonUpdate?.({ ...lesson, backendId: currentBackendId, ...updates });
+          if (result.transcriptStatus === 'PROCESSING') {
+            startPolling(currentBackendId);
+          }
+        } catch (statusErr) {
+          if (!isMountedRef.current) return;
+          if (statusErr instanceof ApiError && statusErr.status === 401) {
+            setUploadError(SESSION_EXPIRED_MSG);
+          } else {
+            setUploadError('Upload conflict. Please try again.');
+          }
+        }
+        return;
+      }
+
       let msg: string;
       if (err instanceof ApiError && err.status === 401) {
         msg = SESSION_EXPIRED_MSG;
