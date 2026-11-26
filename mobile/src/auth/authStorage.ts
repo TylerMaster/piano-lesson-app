@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 const TOKEN_KEY = 'auth_token';
 const USER_ID_KEY = 'auth_user_id';
+const EMAIL_KEY = 'auth_email';
 
 export class StorageError extends Error {
   constructor(cause: unknown) {
@@ -57,6 +58,30 @@ export async function getUserId(): Promise<number | null> {
 export async function clearUserId(): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(USER_ID_KEY);
+  } catch (err) {
+    throw new StorageError(err);
+  }
+}
+
+export async function saveEmail(email: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(EMAIL_KEY, email);
+  } catch (err) {
+    throw new StorageError(err);
+  }
+}
+
+export async function getEmail(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(EMAIL_KEY);
+  } catch (err) {
+    throw new StorageError(err);
+  }
+}
+
+export async function clearEmail(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(EMAIL_KEY);
   } catch (err) {
     throw new StorageError(err);
   }

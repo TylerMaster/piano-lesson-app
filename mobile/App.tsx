@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import AuthGate from './src/auth/AuthGate';
 import {
+  Alert,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -13,23 +14,15 @@ import {
 import RecordingScreen from './src/RecordingScreen';
 import type { Lesson } from './src/types';
 import { updateMissingDurations, findOrphanedRecordings } from './src/storage';
-import { recoverRecording, deleteLesson, renameLesson, clearAllLocalLessons } from './src/storage';
+import { recoverRecording, deleteLesson, renameLesson } from './src/storage';
 import PlaybackScreen from './src/PlaybackScreen';
 import CalendarView from './src/CalendarView';
-import ChangePasswordScreen from './src/auth/ChangePasswordScreen';
-  import { COLORS } from './src/constants/theme';
+import AccountScreen from './src/AccountScreen';
+import NavMenu from './src/NavMenu';
+import { COLORS } from './src/constants/theme';
 import { formatDate } from './src/utils/formatDate';
-import {
-  Alert,
-  // keep your other existing imports
-} from 'react-native';
 
-type Screen = 'home' | 'recording' | 'change-password';
-
-// Set to false and remove the button once the one-time local data cleanup is done.
-const DEV_SHOW_CLEAR_BUTTON = true;
-
-
+type Screen = 'home' | 'recording' | 'account';
 
 function formatDuration(ms: number): string {
   if (ms <= 0) {
@@ -127,12 +120,11 @@ function AppContent() {
   if (userId === null) return null;
   const uid = userId;
   const [screen, setScreen] = useState<Screen>('home');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [orphanedRecordings, setOrphanedRecordings] = useState<string[]>([]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [homeView, setHomeView] = useState<'list' | 'calendar'>('list');
-  const [isClearing, setIsClearing] = useState(false);
-
   // On startup: load persisted lessons and verify each file still exists.
   // validateAndLoadLessons removes stale entries and re-saves the cleaned list.
   useEffect(() => {
@@ -218,39 +210,13 @@ async function handleDeleteLesson(lesson: Lesson) {
 
 
   function handleLogout() {
+    setMenuOpen(false);
     Alert.alert(
       'Log out?',
       'You will need to sign in again to access your lessons.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Log Out', style: 'destructive', onPress: logout },
-      ]
-    );
-  }
-
-  async function handleClearLocalData() {
-    Alert.alert(
-      'Clear local recordings?',
-      'This permanently deletes all pre-account audio files and lesson metadata from this device. Backend records and your account are not affected. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All',
-          style: 'destructive',
-          onPress: async () => {
-            setIsClearing(true);
-            try {
-              await clearAllLocalLessons(uid);
-              setLessons([]);
-              setOrphanedRecordings([]);
-            } catch (error) {
-              console.error('[Cleanup] Failed:', error);
-              Alert.alert('Cleanup failed', 'Something went wrong. Please try again.');
-            } finally {
-              setIsClearing(false);
-            }
-          },
-        },
       ]
     );
   }
@@ -282,8 +248,8 @@ async function handleDeleteLesson(lesson: Lesson) {
   );
 }
 
-  if (screen === 'change-password') {
-    return <ChangePasswordScreen onBack={() => setScreen('home')} />;
+  if (screen === 'account') {
+    return <AccountScreen onBack={() => setScreen('home')} />;
   }
 
   return (
@@ -298,21 +264,14 @@ async function handleDeleteLesson(lesson: Lesson) {
             <Text style={styles.appTitle}>Piano Lesson</Text>
             <Text style={styles.appTitleAccent}>Companion</Text>
           </View>
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              onPress={handleLogout}
-              activeOpacity={0.7}
-              style={styles.logoutButton}
-            >
-              <Text style={styles.logoutButtonText}>Log out</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setScreen('change-password')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.changePasswordText}>Change password</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={() => setMenuOpen(true)}
+            style={styles.menuButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.menuButtonText}>☰</Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity
@@ -429,19 +388,16 @@ async function handleDeleteLesson(lesson: Lesson) {
           )}
         </View>
 
-        {DEV_SHOW_CLEAR_BUTTON && (
-          <TouchableOpacity
-            style={[styles.devClearButton, isClearing && styles.devClearButtonDisabled]}
-            onPress={handleClearLocalData}
-            disabled={isClearing}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.devClearButtonText}>
-              {isClearing ? 'Clearing…' : 'Clear Pre-Account Local Data'}
-            </Text>
-          </TouchableOpacity>
-        )}
       </ScrollView>
+
+      <NavMenu
+        visible={menuOpen}
+        activeScreen="lessons"
+        onClose={() => setMenuOpen(false)}
+        onGoMyLessons={() => { setSelectedLesson(null); setScreen('home'); setHomeView('list'); setMenuOpen(false); }}
+        onGoAccount={() => { setSelectedLesson(null); setScreen('account'); setMenuOpen(false); }}
+        onLogout={handleLogout}
+      />
     </SafeAreaView>
   );
 }
@@ -467,21 +423,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  headerActions: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  logoutButton: {
+  menuButton: {
     paddingTop: 6,
   },
-  logoutButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: COLORS.textMuted,
-  },
-  changePasswordText: {
-    fontSize: 13,
-    color: COLORS.textMuted,
+  menuButtonText: {
+    fontSize: 24,
+    color: COLORS.textSecondary,
   },
   appTitle: {
     fontSize: 36,
@@ -667,20 +614,4 @@ deleteButtonText: {
     color: '#111111',
   },
 
-  devClearButton: {
-    marginTop: 32,
-    borderWidth: 1,
-    borderColor: '#FF453A',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  devClearButtonDisabled: {
-    opacity: 0.5,
-  },
-  devClearButtonText: {
-    fontSize: 14,
-    color: '#FF453A',
-    fontWeight: '600',
-  },
 });

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  BackHandler,
   Modal,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,8 @@ import { formatDate } from './utils/formatDate';
 import { registerLesson, uploadAudio, fetchLessonStatus, requestLessonSummary, ApiError } from './api';
 import { updateLesson } from './storage';
 import { useAuth } from './auth/AuthContext';
+import LessonSummaryScreen from './LessonSummaryScreen';
+import TranscriptScreen from './TranscriptScreen';
 
 
 interface PlaybackScreenProps {
@@ -71,6 +74,7 @@ export default function PlaybackScreen({
   const [summary, setSummary] = useState<LessonSummary | null>(lesson.summary ?? null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [subScreen, setSubScreen] = useState<'transcript' | 'summary' | null>(null);
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const isMountedRef = useRef(true);
@@ -87,6 +91,19 @@ export default function PlaybackScreen({
       stopSummaryPolling();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Android back button: dismiss sub-screen first, then go back to lesson list.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (subScreen !== null) {
+        setSubScreen(null);
+        return true;
+      }
+      onBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [subScreen, onBack]);
 
   // On mount: if the lesson has a backendId, fetch the current backend status
   // when any work may still be in progress — either transcription or summarization.
@@ -440,177 +457,49 @@ export default function PlaybackScreen({
     player.seekTo((bounded / progressBarWidth.current) * status.duration);
   }
 
-  // ── Transcription section ───────────────────────────────────────────────
+  // ── Nav row status labels ───────────────────────────────────────────────
 
-  // Returns the appropriate UI card for the current transcription state.
-  //
-  // Priority order:
-  //   1. DONE with transcript → display it
-  //   2. isSubmitting         → uploading spinner text
-  //   3. PROCESSING           → transcribing spinner text
-  //   4. FAILED or uploadError→ error message + retry button
-  //   5. Everything else      → "Get Transcript" upload button
-  //      (covers: no backendId, PENDING with backendId but no audio, null status)
-  function renderTranscriptionSection() {
-    if (transcriptStatus === 'DONE' && transcript) {
-      return (
-        <View style={styles.transcriptionSection}>
-          <Text style={styles.transcriptionLabel}>Transcript</Text>
-          <Text style={styles.transcriptionText}>{transcript}</Text>
-        </View>
-      );
-    }
+  function getTranscriptStatusLabel(): string {
+    if (isSubmitting) return 'Uploading…';
+    if (transcriptStatus === 'DONE') return 'Ready';
+    if (transcriptStatus === 'PROCESSING') return 'Transcribing…';
+    if (transcriptStatus === 'FAILED' || uploadError !== null) return 'Failed';
+    return 'Not uploaded';
+  }
 
-    if (isSubmitting) {
-      return (
-        <View style={styles.transcriptionSection}>
-          <Text style={styles.transcriptionLabel}>Transcription</Text>
-          <Text style={styles.transcriptionBody}>Uploading recording...</Text>
-        </View>
-      );
-    }
+  function getSummaryStatusLabel(): string {
+    if (isSummarizing) return 'Requesting…';
+    if (summaryStatus === 'DONE') return 'Ready';
+    if (summaryStatus === 'PENDING' || summaryStatus === 'PROCESSING') return 'Generating…';
+    if (summaryStatus === 'FAILED' || summaryError !== null) return 'Failed';
+    return 'Not generated';
+  }
 
-    if (transcriptStatus === 'PROCESSING') {
-      return (
-        <View style={styles.transcriptionSection}>
-          <Text style={styles.transcriptionLabel}>Transcription</Text>
-          <Text style={styles.transcriptionBody}>
-            Transcribing... This usually takes a minute or two.
-          </Text>
-          <Text style={styles.transcriptionHint}>
-            You can leave this screen. The transcript will be saved when complete.
-          </Text>
-          <TouchableOpacity style={styles.retryLink} onPress={handleSubmit}>
-            <Text style={styles.retryLinkText}>Taking too long? Retry</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-    // PENDING means the backend has a lesson record but no audio was ever
-    // uploaded (e.g. the app crashed between registration and upload).
-    // Fall through to the default "Get Transcript" card below.
+  // ── Sub-screen routing ──────────────────────────────────────────────────
 
-    if (transcriptStatus === 'FAILED' || uploadError) {
-      return (
-        <View style={styles.transcriptionSection}>
-          <Text style={styles.transcriptionLabel}>
-            {transcriptStatus === 'FAILED' ? 'Transcription Failed' : 'Upload Failed'}
-          </Text>
-          <Text style={styles.transcriptionErrorBody}>
-            {uploadError ?? 'Transcription failed on the server.'}
-          </Text>
-          <TouchableOpacity style={styles.actionButton} onPress={handleSubmit}>
-            <Text style={styles.actionButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-
+  if (subScreen === 'transcript') {
     return (
-      <View style={styles.transcriptionSection}>
-        <Text style={styles.transcriptionLabel}>Transcription</Text>
-        <Text style={styles.transcriptionBody}>
-          Upload this recording to get a text transcript of your lesson.
-        </Text>
-        <TouchableOpacity style={styles.actionButton} onPress={handleSubmit}>
-          <Text style={styles.actionButtonText}>Get Transcript</Text>
-        </TouchableOpacity>
-      </View>
+      <TranscriptScreen
+        transcriptStatus={transcriptStatus}
+        transcript={transcript}
+        isSubmitting={isSubmitting}
+        uploadError={uploadError}
+        onSubmit={handleSubmit}
+        onBack={() => setSubScreen(null)}
+      />
     );
   }
 
-  // ── Summary section ─────────────────────────────────────────────────────
-
-  // Returns null until transcription is complete. After that, renders the
-  // appropriate UI card for the current summarization state.
-  //
-  // Priority order:
-  //   1. DONE with summary       → structured display (corrections, techniques,
-  //                                 practice assignments, reminders)
-  //   2. isSummarizing           → requesting spinner text
-  //   3. PENDING or PROCESSING   → generating spinner text with hint
-  //   4. FAILED or summaryError  → error message + retry button
-  //   5. NOT_REQUESTED or null   → "Generate Summary" button
-  function renderSummarySection() {
-    if (transcriptStatus !== 'DONE') return null;
-
-    if (summaryStatus === 'DONE' && summary) {
-      const categories = [
-        { label: 'Corrections',         items: summary.corrections },
-        { label: 'Techniques',          items: summary.techniques },
-        { label: 'Practice Assignments', items: summary.practiceAssignments },
-        { label: 'Reminders',           items: summary.reminders },
-      ];
-      const nonEmpty = categories.filter(c => c.items.length > 0);
-
-      return (
-        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
-          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
-          {nonEmpty.map(cat => (
-            <View key={cat.label} style={styles.summaryCategory}>
-              <Text style={styles.summaryCategoryLabel}>{cat.label}</Text>
-              {cat.items.map((item, idx) => (
-                <View key={idx} style={styles.summaryItem}>
-                  <Text style={styles.summaryItemContent}>{item.content}</Text>
-                  <Text style={styles.summaryItemEvidence}>"{item.evidence}"</Text>
-                </View>
-              ))}
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    if (isSummarizing) {
-      return (
-        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
-          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
-          <Text style={styles.transcriptionBody}>Requesting summary...</Text>
-        </View>
-      );
-    }
-
-    if (summaryStatus === 'PENDING' || summaryStatus === 'PROCESSING') {
-      return (
-        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
-          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
-          <Text style={styles.transcriptionBody}>
-            Generating summary... This may take a minute.
-          </Text>
-          <Text style={styles.transcriptionHint}>
-            You can leave this screen. The summary will be saved when complete.
-          </Text>
-        </View>
-      );
-    }
-
-    if (summaryStatus === 'FAILED' || summaryError) {
-      return (
-        <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
-          <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
-          <Text style={styles.transcriptionErrorBody}>
-            {summaryError ?? 'Summary generation failed. Tap below to try again.'}
-          </Text>
-          <TouchableOpacity style={styles.actionButton} onPress={handleSummarize}>
-            <Text style={styles.actionButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-
-    // NOT_REQUESTED or null — transcription is done and no summary has been
-    // requested yet.
+  if (subScreen === 'summary') {
     return (
-      <View style={[styles.transcriptionSection, styles.summaryTopMargin]}>
-        <Text style={styles.transcriptionLabel}>Lesson Summary</Text>
-        <Text style={styles.transcriptionBody}>
-          Generate an AI summary of this lesson, including corrections, techniques,
-          practice assignments, and reminders.
-        </Text>
-        <TouchableOpacity style={styles.actionButton} onPress={handleSummarize}>
-          <Text style={styles.actionButtonText}>Generate Summary</Text>
-        </TouchableOpacity>
-      </View>
+      <LessonSummaryScreen
+        summaryStatus={summaryStatus}
+        summary={summary}
+        isSummarizing={isSummarizing}
+        summaryError={summaryError}
+        onSummarize={handleSummarize}
+        onBack={() => setSubScreen(null)}
+      />
     );
   }
 
@@ -744,11 +633,34 @@ export default function PlaybackScreen({
           </TouchableOpacity>
         </View>
 
-        {/* Transcription */}
-        {renderTranscriptionSection()}
+        {/* Transcript and Summary nav rows */}
+        <View style={styles.navSection}>
+          <TouchableOpacity
+            style={[styles.navRow, styles.navRowBorder]}
+            onPress={() => setSubScreen('transcript')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.navRowLeft}>
+              <Text style={styles.navRowLabel}>Transcript</Text>
+              <Text style={styles.navRowStatus}>{getTranscriptStatusLabel()}</Text>
+            </View>
+            <Text style={styles.navRowChevron}>›</Text>
+          </TouchableOpacity>
 
-        {/* Summary — only rendered once transcription is DONE */}
-        {renderSummarySection()}
+          {transcriptStatus === 'DONE' && (
+            <TouchableOpacity
+              style={styles.navRow}
+              onPress={() => setSubScreen('summary')}
+              activeOpacity={0.7}
+            >
+              <View style={styles.navRowLeft}>
+                <Text style={styles.navRowLabel}>Lesson Summary</Text>
+                <Text style={styles.navRowStatus}>{getSummaryStatusLabel()}</Text>
+              </View>
+              <Text style={styles.navRowChevron}>›</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
       </ScrollView>
     </View>
@@ -929,97 +841,39 @@ const styles = StyleSheet.create({
     color: COLORS.accent,
   },
 
-  // ── Transcription section ─────────────────────────────────────────────
-
-  transcriptionSection: {
+  // ── Nav rows ──────────────────────────────────────────────────────────
+  navSection: {
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
+    overflow: 'hidden',
+  },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.surface,
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
-  transcriptionLabel: {
-    fontSize: 11,
+  navRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  navRowLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  navRowLabel: {
+    fontSize: 15,
     fontWeight: '600',
-    color: COLORS.textMuted,
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-  },
-  transcriptionBody: {
-    fontSize: 15,
-    color: COLORS.textSecondary,
-    lineHeight: 24,
-    marginBottom: 16,
-  },
-  transcriptionErrorBody: {
-    fontSize: 15,
-    color: '#FF453A',
-    lineHeight: 24,
-    marginBottom: 16,
-  },
-  transcriptionHint: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    lineHeight: 20,
-    marginTop: -8,
-  },
-  transcriptionText: {
-    fontSize: 15,
     color: COLORS.textPrimary,
-    lineHeight: 26,
   },
-  actionButton: {
-    backgroundColor: COLORS.accent,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    color: '#111111',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  // Secondary link shown while PROCESSING — lets the user manually break
-  // out of an indefinitely-stuck transcription without a prominent button.
-  retryLink: {
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  retryLinkText: {
+  navRowStatus: {
     fontSize: 13,
-    color: COLORS.textMuted,
-    textDecorationLine: 'underline',
-  },
-
-  // ── Summary section ───────────────────────────────────────────────────
-  summaryTopMargin: {
-    marginTop: 16,
-  },
-  summaryCategory: {
-    marginTop: 16,
-  },
-  summaryCategoryLabel: {
-    fontSize: 12,
-    fontWeight: '600',
     color: COLORS.textSecondary,
-    letterSpacing: 1.0,
-    textTransform: 'uppercase',
-    marginBottom: 10,
   },
-  summaryItem: {
-    marginBottom: 12,
-  },
-  summaryItemContent: {
-    fontSize: 15,
-    color: COLORS.textPrimary,
-    lineHeight: 22,
-    marginBottom: 4,
-  },
-  summaryItemEvidence: {
-    fontSize: 13,
+  navRowChevron: {
+    fontSize: 20,
     color: COLORS.textMuted,
-    lineHeight: 20,
-    fontStyle: 'italic',
   },
 });

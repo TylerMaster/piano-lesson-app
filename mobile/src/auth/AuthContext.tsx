@@ -5,7 +5,17 @@ import React, {
   useEffect,
   useState,
 } from 'react';
-import { clearToken, clearUserId, getToken, getUserId, saveToken, saveUserId } from './authStorage';
+import {
+  clearEmail,
+  clearToken,
+  clearUserId,
+  getEmail,
+  getToken,
+  getUserId,
+  saveEmail,
+  saveToken,
+  saveUserId,
+} from './authStorage';
 import {
   login as apiLogin,
   register as apiRegister,
@@ -43,14 +53,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // the credentials are unusable — clear both and require the user to log in
   // again rather than entering the app with a null userId.
   useEffect(() => {
-    Promise.all([getToken(), getUserId()])
-      .then(([token, userId]) => {
+    Promise.all([getToken(), getUserId(), getEmail()])
+      .then(([token, userId, email]) => {
         if (token !== null && userId === null) {
-          return Promise.all([clearToken(), clearUserId()]).then(() => {
+          return Promise.all([clearToken(), clearUserId(), clearEmail()]).then(() => {
             setState({ token: null, userId: null, email: null, isLoading: false });
           });
         }
-        setState({ token, userId, email: null, isLoading: false });
+        setState({ token, userId, email, isLoading: false });
       })
       .catch(() => {
         setState((prev) => ({ ...prev, isLoading: false }));
@@ -59,13 +69,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const data = await apiLogin(email, password);
-    // Persist token and userId atomically: if either save fails, clear both
-    // so we never store a token without its matching userId (or vice versa).
     try {
       await saveToken(data.token);
       await saveUserId(data.userId);
+      await saveEmail(data.email);
     } catch (err) {
-      await Promise.all([clearToken(), clearUserId()]).catch(() => {});
+      await Promise.all([clearToken(), clearUserId(), clearEmail()]).catch(() => {});
       throw err;
     }
     setState({
@@ -84,8 +93,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await saveToken(data.token);
       await saveUserId(data.userId);
+      await saveEmail(data.email);
     } catch (err) {
-      await Promise.all([clearToken(), clearUserId()]).catch(() => {});
+      await Promise.all([clearToken(), clearUserId(), clearEmail()]).catch(() => {});
       throw err;
     }
     setState({
@@ -98,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await Promise.all([clearToken(), clearUserId()]);
+      await Promise.all([clearToken(), clearUserId(), clearEmail()]);
     } catch (err) {
       console.warn('[Auth] Failed to clear stored credentials during logout:', err);
     }
